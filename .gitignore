@@ -1,0 +1,15 @@
+# Python Virtual Environment
+venv/
+env/
+__pycache__/
+
+# Secrets and Configuration
+.env
+secrets/
+*.pem
+*.key
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
+
