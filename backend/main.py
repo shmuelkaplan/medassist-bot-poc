@@ -1,8 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
 from backend.models import ClinicalNote
-# Load environment variables from the .env file on startup
+from backend.logger import setup_logger
+from backend.database import db
+
 load_dotenv()
+logger = setup_logger(__name__)
 
 app = FastAPI(
     title="Medical Assistant Logic Tier",
@@ -22,7 +25,7 @@ async def health_check() -> dict:
 
 
 @app.post("/notes/")
-async def submit_clinical_note(note: ClinicalNote) -> dict:
+def submit_clinical_note(note: ClinicalNote) -> dict:
     """
     Receive and validate a new clinical note from the Presentation Tier.
     
@@ -32,7 +35,23 @@ async def submit_clinical_note(note: ClinicalNote) -> dict:
     Returns:
         dict: A confirmation message and the echoed data.
     """
-    return {
-        "message": "Note successfully validated and received.",
-        "data": note.model_dump()
-    }
+    logger.info(f"Recevied new Clinical Note with Patien ID: {note.patient_id}")
+
+    try:
+        # formathing the data from pydantic to dict
+        note_data = note.model_dump()
+
+        # writing the data to Firestore 
+        collection_ref = db.collection("clinical_notes")
+        update_time, doc_ref = collection_ref.add(note_data)
+
+        logger.info(f"Succesfuly saved the note to Firestore with document ID: {doc_ref.id}")
+
+        return {
+            "message": "Note successfully validated and saved to database.",
+            "document_id": doc_ref.id
+        }
+    except Exception as e:
+        logger.error(f"Faield to save note to Firestore: {e}")
+        raise HTTPException(status_code=500, detail="Database insertion faild")
+    
