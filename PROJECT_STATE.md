@@ -10,12 +10,12 @@
 - [x] Python virtual environment (`venv`) created and activated.
 - [x] Git repository initialized and initial commit made.
 - [x] Master `.gitignore` created to protect secrets.
-- [x] Directory skeleton (`frontend/`, `backend/`) and empty foundation files created.
-- [ ] Dependencies installed via `requirements.txt`.
-- [ ] `.env` file populated with API keys (Gemini, Firebase).
-- [ ] Basic FastAPI gateway (`main.py`) written and running.
-- [ ] Streamlit frontend (`app.py`) written and connecting to FastAPI.
-- [ ] Firestore database connection established (`database.py`).
+- [X] Directory skeleton (`frontend/`, `backend/`) and empty foundation files created.
+- [X] Dependencies installed via `requirements.txt`.
+- [X] `.env` file populated with API keys (Gemini, Firebase). Note: need Gemini api key
+- [X] Basic FastAPI gateway (`main.py`) written and running.
+- [X] Streamlit frontend (`app.py`) written and connecting to FastAPI.
+- [X] Firestore database connection established (`database.py`).
 - [ ] PageIndex reasoning loop built (`index_engine.py`).
 
 ## 3. Current Blocker / Immediate Next Step
