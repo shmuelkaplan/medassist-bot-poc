@@ -1,9 +1,8 @@
-"""
-frontend/app.py
-Presentation Tier: Multi-state UI matching client Figma designs.
-"""
 import streamlit as st
 import requests
+
+
+API_URL = 'https://medassist-backend-oquu.onrender.com'
 
 # Configure the page layout to use the full width for the chat interface
 st.set_page_config(page_title="MedAssist Portal", page_icon="🩺", layout="wide")
@@ -75,7 +74,7 @@ def render_patient_dashboard():
         with st.spinner("Fetching patient records and generating AI summary..."):
             try:
                 # Call our new BFF endpoint
-                url = f"http://localhost:8000/patients/{st.session_state.current_patient}/timeline"
+                url = f"{API_URL}/patients/{st.session_state.current_patient}/timeline"
                 response = requests.get(url)
                 
                 if response.status_code == 200:
@@ -124,7 +123,7 @@ def render_patient_dashboard():
                 with st.spinner("Analyzing patient history and reasoning..."):
                     payload = {"patient_id": st.session_state.current_patient, "question": prompt}
                     try:
-                        response = requests.post("http://localhost:8000/query/", json=payload)
+                        response = requests.post(f"{API_URL}/query/", json=payload)
                         if response.status_code == 200:
                             st.write(response.json().get("answer"))
                         else:
@@ -154,7 +153,7 @@ def render_patient_dashboard():
                     "tags": []
                 }
                 try:
-                    res = requests.post("http://localhost:8000/notes/", json=payload)
+                    res = requests.post(f"{API_URL}/notes/", json=payload)
                     if res.status_code == 200:
                         st.success("Note saved!")
                         st.session_state.timeline_data = None # Drop Cache
@@ -190,7 +189,7 @@ def render_patient_dashboard():
                                 try:
                                     # Send the PUT request to our new endpoint
                                     update_res = requests.put(
-                                        f"http://localhost:8000/notes/{doc_id}", 
+                                        f"{API_URL}/notes/{doc_id}", 
                                         json={"note_content": updated_text}
                                     )
                                     if update_res.status_code == 200:
