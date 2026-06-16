@@ -3,8 +3,9 @@ from dotenv import load_dotenv
 from backend.models import ClinicalNote
 from backend.logger import setup_logger
 from backend.database import db
-from backend.index_engine import query_patient_records, generate_basic_summary, extract_medical_tags
+from backend.index_engine import query_patient_records, generate_basic_summary, extract_medical_tags, generate_clinical_snapshot
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 logger = setup_logger(__name__)
@@ -13,6 +14,14 @@ app = FastAPI(
     title="Medical Assistant Logic Tier",
     description="Backend orchestrator routing requests to Gemini and Firestore.",
     version="0.1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, you'd put your exact Streamlit URL here
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/health")
@@ -31,9 +40,9 @@ def submit_clinical_note(note: dict): # Using dict to match your current Streaml
     logger.info(f"Received new note for patient {note.get('patient_id')}")
     try:
         # 1. INTERCEPT: Run the raw text through the AI Extractor
-        extracted_tags = extract_medical_tags(note.get("note_content", ""))
-        note["tags"] = extracted_tags
-        logger.info(f"AI extracted tags: {extracted_tags}")
+        #extracted_tags = extract_medical_tags(note.get("note_content", ""))
+        #note["tags"] = extracted_tags
+        #logger.info(f"AI extracted tags: {extracted_tags}")
         
         # 2. SAVE: Push the enriched data to Firestore
         db.collection("clinical_notes").add(note)
@@ -81,7 +90,7 @@ def get_patient_timeline(patient_id: str) -> dict:
         notes_ref = db.collection("clinical_notes").where("patient_id", "==", patient_id).stream()
         
         notes_list = []
-        analytics_counter = {} # NEW: We will count the tags here!
+        #analytics_counter = {} 
         
         for note in notes_ref:
             doc = note.to_dict()
@@ -91,9 +100,9 @@ def get_patient_timeline(patient_id: str) -> dict:
             else:
                 doc["date_recorded"] = str(doc.get("date_recorded", "Unknown Date"))
                 
-            # AGGREGATION LOGIC: Count every tag we find in this patient's history
-            for tag in doc.get("tags", []):
-                analytics_counter[tag] = analytics_counter.get(tag, 0) + 1
+            # AGGREGATION LOGIC: Count every tag we find
+           # for tag in doc.get("tags", []):
+           #     analytics_counter[tag] = analytics_counter.get(tag, 0) + 1
                 
             notes_list.append(doc)
             
@@ -102,22 +111,25 @@ def get_patient_timeline(patient_id: str) -> dict:
             
         notes_list.sort(key=lambda x: x.get("date_recorded", ""), reverse=True)
         
+        # --- THE SNAPSHOT UPDATE ---
+        # Stitch the text together for the AI to read
         history_text = "\n\n".join([f"Date: {n.get('date_recorded')} | Note: {n.get('note_content')}" for n in notes_list])
-        ai_summary = generate_basic_summary(history_text)
+        
+        # Call our new Senior Attending Physician prompt
+        clinical_snapshot = generate_clinical_snapshot(history_text)
         
         return {
             "patient_id": patient_id,
-            "summary": ai_summary,
+            "snapshot": clinical_snapshot,  # Changed from 'summary' to 'snapshot'
             "recent_visits": notes_list[:3],
             "older_visits": notes_list[3:],
-            "analytics": analytics_counter # NEW: Send the stats to the frontend!
+            #"analytics": analytics_counter 
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to fetch timeline: {e}")
         raise HTTPException(status_code=500, detail="Database aggregation failed.")
-    
 
 # --- 1. The Pydantic Input Model ---
 class ChatQuery(BaseModel):

@@ -167,7 +167,55 @@ def extract_medical_tags(note_text: str) -> list:
         # If the AI fails, return an empty list so the server doesn't crash
         return []
 
-
+def generate_clinical_snapshot(history_text: str) -> dict:
+    """
+    Scans all unstructured clinical history documents and compiles a structured
+    real-time snapshot for the analytics dashboard.
+    """
+    logger.info("Generating dynamic clinical snapshot dashboard via Gemini...")
+    
+    prompt = f"""
+    You are a Senior Attending Physician handing off a patient to a medical colleague. 
+    Your objective is to provide a comprehensive, real-time clinical picture so the receiving doctor immediately understands the patient's exact state, risks, and history.
+    
+    Analyze the clinical history below and extract ALL possible relevant clinical data. 
+    Do not leave out any detail that would be critical for emergency care or long-term clinical understanding.
+    
+    Return ONLY a valid JSON object. You must include the core clinical keys below, but you are highly encouraged to dynamically invent and add new keys (e.g., "allergies", "vital_trends", "social_history", "critical_warnings", "surgical_history") if that data exists in the notes.
+    
+    Base JSON Schema:
+    {{
+        "current_clinical_picture": "A 2-3 sentence professional physician's summary of their overall state and stability.",
+        "active_diagnoses": ["..."],
+        "regular_medications": ["..."],
+        "pending_tests_and_treatments": ["..."],
+        "future_procedures": ["..."]
+        // --- INVENT AND ADD ANY OTHER CLINICALLY RELEVANT KEYS BELOW ---
+    }}
+    
+    Patient Clinical History:
+    {history_text}
+    """
+    
+    try:
+        response = ai_client.models.generate_content(
+            model=MODEL_ID, 
+            contents=prompt
+        )
+        
+        # Clean up any potential markdown formatting errors
+        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_json)
+    except Exception as e:
+        logger.error(f"Failed to generate clinical snapshot: {e}")
+        # Graceful fallback schema
+        return {
+            "active_diagnoses": [],
+            "regular_medications": [],
+            "current_treatment_status": "Error compiling status.",
+            "pending_tests_and_treatments": [],
+            "future_procedures": []
+        }
 
 # --- Local Testing Block ---
 if __name__ == "__main__":
