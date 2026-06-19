@@ -18,7 +18,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, you'd put your exact Streamlit URL here
+    allow_origins=["https://medassist-bot-poc.streamlit.app"],  # In production, Streamlit URL here
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

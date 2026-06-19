@@ -25,7 +25,7 @@ def setup_ai_client() -> genai.Client:
 ai_client = setup_ai_client()
 
 # Define the model we are using for reasoning
-MODEL_ID = 'gemini-3-flash-preview'
+MODEL_ID = 'gemini-3.5-flash'
 
 def generate_patient_index(patient_history: str) -> str:
     """
