@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from backend.models import ClinicalNote
 from backend.logger import setup_logger
 from backend.database import db
-from backend.index_engine import query_patient_records, generate_basic_summary, extract_medical_tags, generate_clinical_snapshot
+from backend.index_engine import query_patient_records, generate_clinical_snapshot
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
