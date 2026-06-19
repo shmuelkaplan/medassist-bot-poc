@@ -39,7 +39,7 @@ async def health_check() -> dict:
 
 @app.post("/notes/")
 def submit_clinical_note(note: ClinicalNote): # Using dict to match your current Streamlit payload
-    logger.info(f"Received new note for patient {note.get('patient_id')}")
+    logger.info(f"Received new note for patient {note.patient_id}")
     try:
         # Convert the validated Pydantic model back into a dictionary for Firestore
         note_dict = note.model_dump()
