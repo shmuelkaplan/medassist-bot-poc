@@ -9,6 +9,14 @@ import json
 logger = setup_logger(__name__)
 load_dotenv()
 
+# The system will try these active models in order from top to bottom
+FALLBACK_MODELS = [
+    "gemini-3.5-flash",        # Primary: State-of-the-art fast reasoning
+    "gemini-2.5-flash",        # Fallback 1: Solid predecessor, excellent availability
+    "gemini-3.1-flash-lite",   # Fallback 2: Ultra-fast 3-series workhorse
+    "gemini-2.5-flash-lite"    # Fallback 3: Extremely lightweight, virtually never maxed out
+]
+
 def setup_ai_client() -> genai.Client:
     """Configures and returns the unified Google GenAI Client."""
     api_key = os.getenv("GEMINI_API_KEY")
@@ -24,9 +32,84 @@ def setup_ai_client() -> genai.Client:
 # Instantiate the client
 ai_client = setup_ai_client()
 
-# Define the model we are using for reasoning
-MODEL_ID = 'gemini-3.5-flash'
+def generate_clinical_snapshot(history_text: str) -> dict:
+    """
+    Scans all unstructured clinical history documents and compiles a structured
+    real-time snapshot for the analytics dashboard using a resilient model waterfall.
+    """
+    logger.info("Generating dynamic clinical snapshot dashboard via Gemini...")
+    
+    prompt = f"""
+    You are a Senior Attending Physician handing off a patient to a medical colleague. 
+    Your objective is to provide a comprehensive, real-time clinical picture so the receiving doctor immediately understands the patient's exact state, risks, and history.
+    
+    Analyze the clinical history below and extract ALL possible relevant clinical data. 
+    Do not leave out any detail that would be critical for emergency care or long-term clinical understanding.
+    
+    Return ONLY a valid JSON object. You must include the core clinical keys below, but you are highly encouraged to dynamically invent and add new keys (e.g., "allergies", "vital_trends", "social_history", "critical_warnings", "surgical_history") if that data exists in the notes.
+    
+    Base JSON Schema:
+    {{
+        "current_clinical_picture": "A 2-3 sentence professional physician's summary of their overall state and stability.",
+        "active_diagnoses": ["..."],
+        "regular_medications": ["..."],
+        "pending_tests_and_treatments": ["..."],
+        "future_procedures": ["..."]
+    }}
+    
+    Patient Clinical History:
+    {history_text}
+    """
+    
+    # --- 2. The Cascade Routing Loop ---
+    for model_id in FALLBACK_MODELS:
+        try:
+            logger.info(f"Attempting JSON extraction with model: {model_id}")
+            
+            response = ai_client.models.generate_content(
+                model=model_id, 
+                contents=prompt
+            )
+            
+            # Clean up any potential markdown formatting errors
+            clean_json = response.text.replace("```json", "").replace("```", "").strip()
+            parsed_data = json.loads(clean_json)
+            
+            logger.info(f"Success! Snapshot compiled using {model_id}")
+            return parsed_data
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Catch Traffic/Server Errors
+            if "503" in error_msg or "429" in error_msg:
+                logger.warning(f"Server {model_id} is busy. Falling back to next model...")
+                time.sleep(1)
+                continue
+                
+            # Catch JSON Parsing Errors (in case a fallback model hallucinated bad text)
+            elif "Expecting value" in error_msg or "JSONDecodeError" in error_msg.__class__.__name__:
+                logger.warning(f"Model {model_id} returned invalid JSON. Falling back to next model...")
+                continue
+                
+            # For critical auth or code errors, break the loop immediately
+            else:
+                logger.error(f"Critical AI Error with {model_id}: {error_msg}")
+                break
+                
+    # --- 3. The Ultimate Graceful Degradation ---
+    # If the loop exhausts all models, return a safe schema so the Streamlit UI doesn't crash
+    logger.error("All AI models failed or timed out. Returning safe fallback schema.")
+    return {
+        "current_clinical_picture": "System Warning: AI extraction is temporarily unavailable due to extreme global server demand. Please read raw notes below.",
+        "active_diagnoses": [],
+        "regular_medications": [],
+        "pending_tests_and_treatments": [],
+        "future_procedures": []
+    }
 
+
+'''
 def generate_patient_index(patient_history: str) -> str:
     """
     Phase 1 of PageIndex architecture: 
@@ -128,94 +211,10 @@ def generate_basic_summary(patient_history: str) -> str:
         logger.error(f"Failed to generate summary: {e}")
         return "Automatic summary currently unavailable."
 
+'''
 
-def extract_medical_tags(note_text: str) -> list:
-    """
-    Reads a raw clinical note and extracts medical entities into a structured JSON array.
-    """
-    logger.info("Extracting structured medical entities from note...")
-    
-    prompt = f"""
-    You are a medical data extraction algorithm. Read the following clinical note.
-    Extract all medical conditions, medications, and symptoms, and any other information 
-    that a docotor should know imediatly in emerhency cases and clinical data that give the picture 
-    of the patient help.
-    
-    Return ONLY a valid JSON list of strings. Format each string exactly like this: "Category: Value".
-    Do not include any other text or markdown formatting.
-    
-    Example Output: 
-    ["Condition: Hypertension", "Medication: Amlodipine 5mg", "Symptom: Chest pain"]
-    
-    Clinical Note:
-    {note_text}
-    """
-    
-    try:
-        response = ai_client.models.generate_content(
-            model=MODEL_ID, 
-            contents=prompt
-        )
-        
-        # Safety filter: LLMs sometimes wrap JSON in markdown blockticks (```json ... ```)
-        # We strip those out so Python's json.loads() doesn't crash.
-        clean_json = response.text.replace("```json", "").replace("```", "").strip()
-        
-        return json.loads(clean_json)
-    except Exception as e:
-        logger.error(f"Failed to extract tags: {e}")
-        # If the AI fails, return an empty list so the server doesn't crash
-        return []
 
-def generate_clinical_snapshot(history_text: str) -> dict:
-    """
-    Scans all unstructured clinical history documents and compiles a structured
-    real-time snapshot for the analytics dashboard.
-    """
-    logger.info("Generating dynamic clinical snapshot dashboard via Gemini...")
-    
-    prompt = f"""
-    You are a Senior Attending Physician handing off a patient to a medical colleague. 
-    Your objective is to provide a comprehensive, real-time clinical picture so the receiving doctor immediately understands the patient's exact state, risks, and history.
-    
-    Analyze the clinical history below and extract ALL possible relevant clinical data. 
-    Do not leave out any detail that would be critical for emergency care or long-term clinical understanding.
-    
-    Return ONLY a valid JSON object. You must include the core clinical keys below, but you are highly encouraged to dynamically invent and add new keys (e.g., "allergies", "vital_trends", "social_history", "critical_warnings", "surgical_history") if that data exists in the notes.
-    
-    Base JSON Schema:
-    {{
-        "current_clinical_picture": "A 2-3 sentence professional physician's summary of their overall state and stability.",
-        "active_diagnoses": ["..."],
-        "regular_medications": ["..."],
-        "pending_tests_and_treatments": ["..."],
-        "future_procedures": ["..."]
-        // --- INVENT AND ADD ANY OTHER CLINICALLY RELEVANT KEYS BELOW ---
-    }}
-    
-    Patient Clinical History:
-    {history_text}
-    """
-    
-    try:
-        response = ai_client.models.generate_content(
-            model=MODEL_ID, 
-            contents=prompt
-        )
-        
-        # Clean up any potential markdown formatting errors
-        clean_json = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_json)
-    except Exception as e:
-        logger.error(f"Failed to generate clinical snapshot: {e}")
-        # Graceful fallback schema
-        return {
-            "active_diagnoses": [],
-            "regular_medications": [],
-            "current_treatment_status": "Error compiling status.",
-            "pending_tests_and_treatments": [],
-            "future_procedures": []
-        }
+
 
 # --- Local Testing Block ---
 if __name__ == "__main__":
