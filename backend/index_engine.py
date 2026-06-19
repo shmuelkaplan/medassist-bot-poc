@@ -4,7 +4,7 @@ from google import genai
 from dotenv import load_dotenv
 from backend.logger import setup_logger
 import json
-
+import time 
 
 logger = setup_logger(__name__)
 load_dotenv()
@@ -31,6 +31,127 @@ def setup_ai_client() -> genai.Client:
 
 # Instantiate the client
 ai_client = setup_ai_client()
+
+
+def generate_patient_index(patient_history: str) -> str:
+    """
+    Phase 1 of PageIndex architecture: 
+    Generates a structured hierarchical map (Table of Contents) of the patient's records.
+    
+    Architectural Update: Implements a Model Waterfall fallback loop to gracefully
+    handle 503/429 traffic spikes from the primary LLM provider.
+    """
+    logger.info("Generating chronological index for patient records...")
+    
+    prompt = f"""
+    You are a medical data architect. Analyze the following patient history.
+    Do not answer any questions. Your only job is to create a chronological 'Table of Contents' 
+    mapping the patient's visits, departments, and major medical events.
+    
+    Patient History:
+    {patient_history}
+    
+    Output a structured map.
+    """
+    
+    # --- The Cascade Routing Loop ---
+    for model_id in FALLBACK_MODELS:
+        try:
+            logger.info(f"Attempting to generate index map using model: {model_id}")
+            
+            # In the new SDK, we call generate_content on the client.models interface
+            response = ai_client.models.generate_content(
+                model=model_id, 
+                contents=prompt
+            )
+            
+            logger.info(f"Successfully generated index map using {model_id}.")
+            return response.text
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Catch Traffic/Server Errors
+            if "503" in error_msg or "429" in error_msg:
+                logger.warning(f"Server {model_id} is busy. Falling back to next model for index generation...")
+                time.sleep(1)
+                continue
+            else:
+                # If it's a structural error (like API keys), break the loop
+                logger.error(f"Critical AI Error with {model_id} during index generation: {error_msg}")
+                break
+                
+    # --- Ultimate Graceful Degradation ---
+    # If the index fails to build, we return a fallback string. 
+    # Phase 2 will receive this string and naturally fall back to reading the raw text.
+    logger.error("All AI models failed to generate the patient index. Returning bypass string.")
+    return "Index Generation Failed due to server load. Proceed to Phase 2 and read the raw patient history directly."
+
+
+def query_patient_records(question: str, patient_history: str) -> str:
+    """
+    Phase 2 of PageIndex architecture:
+    Uses the generated index to reason about where the answer lives, then extracts it.
+    
+    Architectural Update: Now implements a Model Waterfall fallback loop to gracefully
+    handle 503/429 traffic spikes from the primary LLM provider.
+    """
+    logger.info(f"Processing clinical query: '{question}'")
+    
+    # 1. First, we dynamically generate the structural map
+    index_map = generate_patient_index(patient_history)
+    
+    # 2. Then, we construct the reasoning prompt
+    reasoning_prompt = f"""
+    You are an expert Chief Medical Officer analyzing a patient file.
+    
+    Step 1: Review this structural map of the patient's history to locate relevant events.
+    <index_map>
+    {index_map}
+    </index_map>
+    
+    Step 2: Review the full unstructured clinical text.
+    <patient_history>
+    {patient_history}
+    </patient_history>
+    
+    Question: {question}
+    
+    Based ONLY on the provided text, answer the question. Cite the specific visit date or department in your answer.
+    """
+    
+    # 3. The Cascade Routing Loop
+    for model_id in FALLBACK_MODELS:
+        try:
+            logger.info(f"Attempting reasoning query with model: {model_id}")
+            
+            response = ai_client.models.generate_content(
+                model=model_id, 
+                contents=reasoning_prompt
+            )
+            
+            logger.info(f"Successfully executed reasoning loop using {model_id}.")
+            return response.text
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Catch Traffic/Server Errors
+            if "503" in error_msg or "429" in error_msg:
+                logger.warning(f"Server {model_id} is busy. Falling back to next model...")
+                time.sleep(1)
+                continue
+            else:
+                # If it's a structural error (like API keys), break the loop
+                logger.error(f"Critical AI Error with {model_id}: {error_msg}")
+                break
+                
+    # 4. Ultimate Graceful Degradation
+    logger.error("All AI models failed or timed out during patient query.")
+    return "System Warning: The AI reasoning engine is currently experiencing extreme global server demand. Please try again in a few minutes."
+
+
+
 
 def generate_clinical_snapshot(history_text: str) -> dict:
     """
@@ -109,6 +230,8 @@ def generate_clinical_snapshot(history_text: str) -> dict:
     }
 
 
+
+
 '''
 def generate_patient_index(patient_history: str) -> str:
     """
@@ -137,48 +260,10 @@ def generate_patient_index(patient_history: str) -> str:
     except Exception as e:
         logger.error(f"Failed to generate index: {e}")
         raise e
-
-def query_patient_records(question: str, patient_history: str) -> str:
-    """
-    Phase 2 of PageIndex architecture:
-    Uses the generated index to reason about where the answer lives, then extracts it.
-    """
-    logger.info(f"Processing clinical query: '{question}'")
-    
-    # 1. First, we dynamically generate the structural map
-    index_map = generate_patient_index(patient_history)
-    
-    # 2. Then, we force Gemini to use that map to find the answer
-    reasoning_prompt = f"""
-    You are an expert Chief Medical Officer analyzing a patient file.
-    
-    Step 1: Review this structural map of the patient's history to locate relevant events.
-    <index_map>
-    {index_map}
-    </index_map>
-    
-    Step 2: Review the full unstructured clinical text.
-    <patient_history>
-    {patient_history}
-    </patient_history>
-    
-    Question: {question}
-    
-    Based ONLY on the provided text, answer the question. Cite the specific visit date or department in your answer.
-    """
-    
-    try:
-        response = ai_client.models.generate_content(
-            model=MODEL_ID, 
-            contents=reasoning_prompt
-        )
-        logger.info("Successfully executed reasoning loop.")
-        return response.text
-    except Exception as e:
-        logger.error(f"Reasoning query failed: {e}")
-        raise e
+'''
 
 
+'''
 def generate_basic_summary(patient_history: str) -> str:
     """
     Generates a concise 2-3 sentence clinical summary of the patient's history.
