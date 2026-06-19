@@ -6,6 +6,8 @@ from backend.database import db
 from backend.index_engine import query_patient_records, generate_basic_summary, extract_medical_tags, generate_clinical_snapshot
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone
+
 
 load_dotenv()
 logger = setup_logger(__name__)
@@ -36,23 +38,27 @@ async def health_check() -> dict:
 
 
 @app.post("/notes/")
-def submit_clinical_note(note: dict): # Using dict to match your current Streamlit payload
+def submit_clinical_note(note: ClinicalNote): # Using dict to match your current Streamlit payload
     logger.info(f"Received new note for patient {note.get('patient_id')}")
     try:
-        # 1. INTERCEPT: Run the raw text through the AI Extractor
-        #extracted_tags = extract_medical_tags(note.get("note_content", ""))
-        #note["tags"] = extracted_tags
-        #logger.info(f"AI extracted tags: {extracted_tags}")
+        # Convert the validated Pydantic model back into a dictionary for Firestore
+        note_dict = note.model_dump()
         
-        # 2. SAVE: Push the enriched data to Firestore
-        db.collection("clinical_notes").add(note)
-        return {"message": "Note saved and AI extraction complete."}
+        #SAVE: Push the enriched data to Firestore
+        db.collection("clinical_notes").add(note_dict)
+        return {
+            "message": "Note saved successfully.", 
+            "date_recorded": note_dict["date_recorded"]
+        }
     except Exception as e:
         logger.error(f"Failed to save note: {e}")
         raise HTTPException(status_code=500, detail="Database insertion failed.")
 
 
+
+
 # --- 1. Model for Updating a Note ---
+# Notice we keep this exactly the same. The frontend only sends the text.
 class NoteUpdate(BaseModel):
     note_content: str
 
@@ -60,7 +66,8 @@ class NoteUpdate(BaseModel):
 @app.put("/notes/{document_id}")
 def update_clinical_note(document_id: str, update_data: NoteUpdate) -> dict:
     """
-    Updates the text content of an existing clinical note in Firestore.
+    Updates the text content of an existing clinical note in Firestore,
+    and automatically stamps it with an updated_at timestamp.
     """
     logger.info(f"Received update request for document: {document_id}")
     try:
@@ -70,11 +77,15 @@ def update_clinical_note(document_id: str, update_data: NoteUpdate) -> dict:
         if not doc_ref.get().exists:
             raise HTTPException(status_code=404, detail="Note not found.")
             
-        # Perform the update
-        doc_ref.update({"note_content": update_data.note_content})
+        # Perform the update AND inject the server-side timestamp
+        doc_ref.update({
+            "note_content": update_data.note_content,
+            "updated_at": datetime.now(timezone.utc) # server side paramter for kepping logs on updates
+        })
         
         logger.info(f"Successfully updated document: {document_id}")
         return {"message": "Note updated successfully"}
+    
     except HTTPException:
         raise
     except Exception as e:
@@ -90,7 +101,6 @@ def get_patient_timeline(patient_id: str) -> dict:
         notes_ref = db.collection("clinical_notes").where("patient_id", "==", patient_id).stream()
         
         notes_list = []
-        #analytics_counter = {} 
         
         for note in notes_ref:
             doc = note.to_dict()
@@ -99,10 +109,6 @@ def get_patient_timeline(patient_id: str) -> dict:
                 doc["date_recorded"] = doc["date_recorded"].isoformat()
             else:
                 doc["date_recorded"] = str(doc.get("date_recorded", "Unknown Date"))
-                
-            # AGGREGATION LOGIC: Count every tag we find
-           # for tag in doc.get("tags", []):
-           #     analytics_counter[tag] = analytics_counter.get(tag, 0) + 1
                 
             notes_list.append(doc)
             
