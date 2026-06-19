@@ -7,7 +7,7 @@ from backend.index_engine import query_patient_records, generate_basic_summary, 
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
-
+import sys
 
 load_dotenv()
 logger = setup_logger(__name__)
@@ -188,3 +188,9 @@ def ask_medical_assistant(query: ChatQuery) -> dict:
         raise HTTPException(status_code=500, detail="Failed to process medical query.")
 
 
+# adding a util for getting the python version 
+
+
+@app.get("/system-info")
+def get_system_info():
+    return {"python_version": sys.version}
